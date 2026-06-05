@@ -1,0 +1,9 @@
+[project]
+name = "local-ai-brain"
+version = "0.1.0"
+description = "Local-first agent memory index with SQLite, scrub/distill/classify capture, and context-pack retrieval."
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
