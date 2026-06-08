@@ -71,6 +71,7 @@ def tools_list() -> list[dict[str, Any]]:
                     "surface": text_arg,
                     "query": text_arg,
                     "limit": {"type": "integer", "minimum": 1, "maximum": 25},
+                    "proofSession": text_arg,
                 },
                 "additionalProperties": False,
             },
@@ -87,6 +88,7 @@ def tools_list() -> list[dict[str, Any]]:
                     "surface": text_arg,
                     "query": text_arg,
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                    "proofSession": text_arg,
                 },
                 "additionalProperties": False,
             },
@@ -95,6 +97,40 @@ def tools_list() -> list[dict[str, Any]]:
         record_tool("record_artifact", "Record an artifact", "Record an artifact through scrub/distill/classify capture."),
         record_tool("record_ticket", "Record a ticket", "Record a ticket through scrub/distill/classify capture."),
         record_tool("record_event", "Record an event", "Record an event in the Local AI Brain event log."),
+        {
+            "name": "proof_start",
+            "title": "Start proof tracking",
+            "description": "Start a Local AI Brain proof session for a live call.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"repo": text_arg, "surface": text_arg, "summary": text_arg, "taskClass": text_arg},
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+        },
+        {
+            "name": "proof_finish",
+            "title": "Finish proof tracking",
+            "description": "Finish a proof session and record outcome, checks, estimates, and lookup classifications.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"session": text_arg, "payload": {"type": "object", "additionalProperties": True}},
+                "required": ["session", "payload"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
+        },
+        {
+            "name": "proof_report",
+            "title": "Report proof metrics",
+            "description": "Summarize Local AI Brain proof sessions and lookup metrics.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"repo": text_arg, "surface": text_arg, "limit": {"type": "integer", "minimum": 1, "maximum": 500}},
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
+        },
         {
             "name": "rebuild_index",
             "title": "Rebuild search index",
@@ -152,36 +188,38 @@ def call_tool(params: Any) -> dict[str, Any]:
     if name == "doctor":
         return text_content(run_cli(["--json", "doctor"]))
     if name == "context_pack":
+        command = [
+            "context-pack",
+            "--repo",
+            str(args.get("repo", "")),
+            "--surface",
+            str(args.get("surface", "")),
+            "--query",
+            str(args.get("query", "")),
+            "--limit",
+            str(int(args.get("limit", 5) or 5)),
+        ]
+        if args.get("proofSession"):
+            command.extend(["--proof-session", str(args["proofSession"])])
         return text_content(
-            run_cli(
-                [
-                    "context-pack",
-                    "--repo",
-                    str(args.get("repo", "")),
-                    "--surface",
-                    str(args.get("surface", "")),
-                    "--query",
-                    str(args.get("query", "")),
-                    "--limit",
-                    str(int(args.get("limit", 5) or 5)),
-                ]
-            )
+            run_cli(command)
         )
     if name == "search":
+        command = [
+            "search",
+            "--repo",
+            str(args.get("repo", "")),
+            "--surface",
+            str(args.get("surface", "")),
+            "--query",
+            str(args.get("query", "")),
+            "--limit",
+            str(int(args.get("limit", 10) or 10)),
+        ]
+        if args.get("proofSession"):
+            command.extend(["--proof-session", str(args["proofSession"])])
         return text_content(
-            run_cli(
-                [
-                    "search",
-                    "--repo",
-                    str(args.get("repo", "")),
-                    "--surface",
-                    str(args.get("surface", "")),
-                    "--query",
-                    str(args.get("query", "")),
-                    "--limit",
-                    str(int(args.get("limit", 10) or 10)),
-                ]
-            )
+            run_cli(command)
         )
     if name in {"record_artifact", "record_ticket", "record_event"}:
         payload = args.get("payload")
@@ -191,6 +229,46 @@ def call_tool(params: Any) -> dict[str, Any]:
         return text_content(run_record_command(command, payload))
     if name == "rebuild_index":
         return text_content(run_cli(["rebuild-index"]))
+    if name == "proof_start":
+        return text_content(
+            run_cli(
+                [
+                    "proof-start",
+                    "--repo",
+                    str(args.get("repo", "")),
+                    "--surface",
+                    str(args.get("surface", "")),
+                    "--summary",
+                    str(args.get("summary", "")),
+                    "--task-class",
+                    str(args.get("taskClass", "unknown") or "unknown"),
+                    "--json",
+                ]
+            )
+        )
+    if name == "proof_finish":
+        payload = args.get("payload")
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be an object")
+        session = str(args.get("session", ""))
+        if not session:
+            raise ValueError("session is required")
+        return text_content(run_record_command_with_args("proof-finish", ["--session", session], payload))
+    if name == "proof_report":
+        return text_content(
+            run_cli(
+                [
+                    "proof-report",
+                    "--repo",
+                    str(args.get("repo", "")),
+                    "--surface",
+                    str(args.get("surface", "")),
+                    "--limit",
+                    str(int(args.get("limit", 30) or 30)),
+                    "--json",
+                ]
+            )
+        )
     if name == "codex_title_distill":
         command = ["codex-title-distill"]
         if args.get("date"):
@@ -208,11 +286,15 @@ def call_tool(params: Any) -> dict[str, Any]:
 
 
 def run_record_command(command: str, payload: dict[str, Any]) -> str:
+    return run_record_command_with_args(command, [], payload)
+
+
+def run_record_command_with_args(command: str, extra_args: list[str], payload: dict[str, Any]) -> str:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
         json.dump(payload, handle, ensure_ascii=False)
         payload_path = handle.name
     try:
-        return run_cli([command, "--json-file", payload_path])
+        return run_cli([command, *extra_args, "--json-file", payload_path])
     finally:
         try:
             Path(payload_path).unlink()

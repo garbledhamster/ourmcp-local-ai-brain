@@ -15,7 +15,61 @@ import tkinter as tk
 from tkinter import messagebox
 
 
-TOOL_ROOT = Path(__file__).resolve().parent
+SCRIPT_ROOT = Path(__file__).resolve().parent
+
+
+def find_nearest_brain_db() -> Path:
+    explicit_db = os.environ.get("LOCAL_AI_BRAIN_DB", "").strip()
+    if explicit_db:
+        explicit_path = Path(explicit_db).expanduser().resolve()
+        if explicit_path.is_file():
+            return explicit_path
+        raise FileNotFoundError(f"LOCAL_AI_BRAIN_DB does not exist: {explicit_path}")
+
+    explicit_home = os.environ.get("LOCAL_AI_BRAIN_HOME", "").strip()
+    if explicit_home:
+        candidate = Path(explicit_home).expanduser().resolve() / "brain.db"
+        if candidate.is_file():
+            return candidate
+
+    seen: set[Path] = set()
+    for start in (Path.cwd(), SCRIPT_ROOT):
+        current = start.resolve()
+        while current not in seen:
+            seen.add(current)
+            for candidate in brain_db_candidates(current):
+                if candidate.is_file():
+                    return candidate.resolve()
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+
+    details = f" LOCAL_AI_BRAIN_HOME did not contain brain.db: {candidate.parent}." if explicit_home else ""
+    raise FileNotFoundError(f"Could not find a nearby brain.db. Run from a project folder or set LOCAL_AI_BRAIN_DB.{details}")
+
+
+def brain_db_candidates(directory: Path) -> list[Path]:
+    return [
+        directory / "brain.db",
+        directory / "brain" / "brain.db",
+        directory / ".tools" / "local-ai-brain-data" / "brain.db",
+        directory / ".agents" / "data" / "local-ai-brain" / "brain.db",
+    ]
+
+
+def project_root_for_db(database: Path) -> Path:
+    if database.parent.name.lower() == "brain":
+        return database.parent.parent
+    return database.parent
+
+
+BRAIN_DB_PATH = find_nearest_brain_db()
+BRAIN_HOME = BRAIN_DB_PATH.parent
+PROJECT_ROOT = project_root_for_db(BRAIN_DB_PATH)
+SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+TOOL_ROOT = SCRIPTS_DIR if (SCRIPTS_DIR / "local_ai_brain").is_dir() else SCRIPT_ROOT
+os.environ["LOCAL_AI_BRAIN_HOME"] = str(BRAIN_HOME)
 if str(TOOL_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOL_ROOT))
 
@@ -57,6 +111,11 @@ class BrainGui:
         with connect(db_path()) as con:
             init_db(con)
         self.build_ui()
+        self._tab_history: list[str] = []
+        self._active_tab = ""
+        if self.tabs.winfo_children():
+            self._active_tab = self.tabs.select()
+            self.tabs.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self.refresh_all()
         self.root.after(250, self.drain_process_output)
         self.root.after(self.refresh_ms.get(), self.auto_refresh_tick)
@@ -96,6 +155,60 @@ class BrainGui:
         bottom.grid(row=2, column=0, sticky="ew")
         bottom.columnconfigure(0, weight=1)
         ttk.Label(bottom, textvariable=self.status).grid(row=0, column=0, sticky="w")
+        command_panel = ttk.LabelFrame(bottom, text="Command palette", padding=8)
+        command_panel.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        command_panel.columnconfigure(1, weight=1)
+        ttk.Label(command_panel, text="Back: select previous tab  |  Help: command help  |  Quit: close window").grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="w",
+        )
+        self.command_input = StringVar(value="")
+        ttk.Label(command_panel, text="Command").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(command_panel, textvariable=self.command_input).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
+        ttk.Button(command_panel, text="Back", command=self.select_previous_tab).grid(row=1, column=2, pady=(6, 0))
+        ttk.Button(command_panel, text="Help", command=self.show_help_dialog).grid(row=1, column=3, padx=(6, 6), pady=(6, 0))
+        ttk.Button(command_panel, text="Quit", command=self.root.destroy).grid(row=1, column=4, pady=(6, 0))
+        ttk.Button(command_panel, text="Run", command=self.run_command_palette).grid(row=1, column=5, padx=(6, 0), pady=(6, 0))
+
+    def _on_tab_changed(self, _event=None) -> None:
+        selected = self.tabs.select()
+        if selected == self._active_tab or not selected:
+            return
+        if self._active_tab:
+            self._tab_history.append(self._active_tab)
+        self._active_tab = selected
+
+    def select_previous_tab(self) -> None:
+        while self._tab_history:
+            previous = self._tab_history.pop()
+            if previous and previous in self.tabs.tabs():
+                self.tabs.select(previous)
+                return
+        self.tabs.select(self.records_tab)
+
+    def show_help_dialog(self) -> None:
+        messagebox.showinfo(
+            "Local AI Brain command palette",
+            "Commands:\n- b or back: navigate to previous tab\n- h or help: show this help\n- q or quit: close application",
+        )
+
+    def run_command_palette(self) -> None:
+        command = self.command_input.get().strip()
+        if not command:
+            return
+        if command.lower() in {"b", "back"}:
+            self.select_previous_tab()
+            return
+        if command.lower() in {"h", "help"}:
+            self.show_help_dialog()
+            return
+        if command.lower() in {"q", "quit"}:
+            self.root.destroy()
+            return
+        self.command_var.set(command)
+        self.start_command()
 
     def build_records_tab(self) -> None:
         self.records_tab.columnconfigure(0, weight=1)
