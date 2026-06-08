@@ -15,7 +15,7 @@ os.environ["LOCAL_AI_BRAIN_HOME"] = str(PROJECT_ROOT / "brain")
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from local_ai_brain import mcp_server as base_mcp  # noqa: E402
+from local_ai_brain import main_mcp as base_mcp  # noqa: E402
 
 
 PROTOCOL_VERSION = "2025-06-18"

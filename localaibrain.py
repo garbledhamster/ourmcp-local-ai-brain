@@ -18,7 +18,7 @@ CANONICAL_INSTALLER_NAME = "localaibrain.py"
 AGENTS_BLOCK_START = "<!-- LOCAL_AI_BRAIN_PROJECT_START -->"
 AGENTS_BLOCK_END = "<!-- LOCAL_AI_BRAIN_PROJECT_END -->"
 MCP_REGISTRY_NAME = "local-ai-brain-tools.json"
-MCP_ADAPTER_NAME = "project_local_mcp.py"
+MCP_ADAPTER_NAME = "project_mcp.py"
 WORK_FILE_PATTERN = "NNN_slug.ext"
 WORK_FILE_EXAMPLE = "001_file-use-name.md"
 WORK_FILE_EXCLUDED_DIRS = ("scripts", "artifacts", "archive", "brain", "mcp", "meetings", "tools")
@@ -1018,7 +1018,7 @@ os.environ["LOCAL_AI_BRAIN_MCP_SCOPE_DESCRIPTION"] = __SCOPE_DESCRIPTION__
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from local_ai_brain.project_local_mcp import main  # noqa: E402
+from local_ai_brain.project_mcp import main  # noqa: E402
 
 
 if __name__ == "__main__":
